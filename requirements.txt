@@ -3,3 +3,4 @@ google-genai>=0.1.0
 PyPDF2>=3.0.0
 mammoth>=1.6.0
 chess>=1.10.0
+json-repair>=0.30.0
