@@ -49,8 +49,12 @@ with st.sidebar:
     )
     
     target_lang = "English"
+    batch_size = 15
     if action_choice == "Translate Language":
         target_lang = st.selectbox("Target Language", ["Bengali (বাংলা)", "English", "Hindi (हिंदी)"])
+    elif action_choice == "Interactive Quiz & Hints":
+        batch_size = st.slider("Questions per batch (due to AI limits):", min_value=5, max_value=30, value=15, step=5)
+        st.caption("Tip: For 200-question PDFs, generate them in batches of 15-20.")
         
     st.markdown("---")
     # Owner Badge
@@ -126,11 +130,11 @@ if uploaded_file is not None:
         elif not raw_text.strip():
             st.warning("The uploaded file appears to be empty or unreadable.")
         else:
-            with st.spinner("Processing content with Gemini 3.5 Flash-Lite..."):
+            with st.spinner(f"Processing content with Gemini 3.5 Flash-Lite..."):
                 try:
                     # Construct prompt based on chosen action
                     if action_choice == "Interactive Quiz & Hints":
-                        prompt = f"""Based on the following text, generate a comprehensive set of multiple-choice questions covering all key sections. 
+                        prompt = f"""Based on the following document, generate exactly {batch_size} multiple-choice questions covering the text. 
 Return the output STRICTLY as a valid JSON array of objects. Do not include any extra text outside the JSON block.
 Each object must have the following keys:
 - "question": string
@@ -140,16 +144,16 @@ Each object must have the following keys:
 - "explanation": string explaining why the answer is correct
 
 Text to use:
-{raw_text[:20000]}"""
+{raw_text[:30000]}"""
                     else:
                         if action_choice == "Readable / Clean Version":
-                            prompt = f"Clean up this text, fix typos, correct broken line breaks, and present a structured, easy-to-read version:\n\n{raw_text[:15000]}"
+                            prompt = f"Clean up this text, fix typos, correct broken line breaks, and present a structured, easy-to-read version:\n\n{raw_text[:20000]}"
                         elif action_choice == "Summarize & Key Insights":
-                            prompt = f"Provide a comprehensive executive summary, key bullet points, and main takeaways from this text:\n\n{raw_text[:15000]}"
+                            prompt = f"Provide a comprehensive executive summary, key bullet points, and main takeaways from this text:\n\n{raw_text[:20000]}"
                         elif action_choice == "Translate Language":
-                            prompt = f"Translate the following document accurately into {target_lang}:\n\n{raw_text[:15000]}"
+                            prompt = f"Translate the following document accurately into {target_lang}:\n\n{raw_text[:20000]}"
                         elif action_choice == "Chess PGN Breakdown":
-                            prompt = f"Analyze this chess PGN or game notation. Highlight key turning points, tactical themes, mistakes, and strategic plans in plain language:\n\n{raw_text[:15000]}"
+                            prompt = f"Analyze this chess PGN or game notation. Highlight key turning points, tactical themes, mistakes, and strategic plans in plain language:\n\n{raw_text[:20000]}"
 
                     response = client.models.generate_content(
                         model='gemini-3.5-flash-lite',
@@ -184,7 +188,7 @@ Text to use:
 
     # Render Interactive Quiz Workspace if quiz data is loaded
     if action_choice == "Interactive Quiz & Hints" and "quiz_data" in st.session_state:
-        st.markdown("### 🧠 Interactive Quiz Workspace")
+        st.markdown(f"### 🧠 Interactive Quiz Workspace ({len(st.session_state['quiz_data'])} Questions)")
         st.markdown("Test your knowledge! Review the questions, use hints if needed, select your 4 choices, and submit your answers.")
         
         quiz_data = st.session_state["quiz_data"]
