@@ -45,11 +45,10 @@ with st.sidebar:
     )
     
     target_lang = "English"
-    batch_size = 10
+    batch_size = 5
     if action_choice == "Translate Language":
         target_lang = st.selectbox("Target Language", ["Bengali (বাংলা)", "English", "Hindi (हिंदी)"])
     elif action_choice == "Interactive Quiz & Hints":
-        # Capped up to 20 as requested
         batch_size = st.slider("Questions per batch:", min_value=5, max_value=20, value=5, step=5)
         st.caption("Extracts exact sequential questions from your PDF.")
         
@@ -91,11 +90,11 @@ if uploaded_file is not None:
     def generate_quiz_batch():
         if not client:
             st.error("Gemini API key is missing!")
-            return
+            return False
         
         with st.spinner(f"Fetching the next batch of {batch_size} questions..."):
             try:
-                asked_list = st.session_state["asked_questions"]
+                asked_list = st.session_state.get("asked_questions", [])
                 excluded_text = "\n".join([f"- {q}" for q in asked_list]) if asked_list else "None yet."
                 
                 prompt = f"""You are an expert exam parser. Read the attached document carefully and find the NEXT set of {batch_size} consecutive questions that come AFTER the ones already asked.
@@ -107,15 +106,15 @@ INSTRUCTIONS:
 1. Move forward in the document. Skip all questions listed above.
 2. Extract the exact next {batch_size} questions in sequence.
 3. For each question, solve it to determine the correct answer letter/option, provide a helpful hint, and write a step-by-step explanation.
-4. Return the output STRICTLY as a valid JSON array of objects with no markdown outside:
+4. Return the output STRICTLY as a valid JSON array of objects. Format:
 [
-  {
+  {{
     "question": "Exact question text",
     "options": ["(1) ...", "(2) ...", "(3) ...", "(4) ..."],
     "answer": "1",
     "hint": "Clue",
     "explanation": "Solution"
-  }
+  }}
 ]"""
 
                 if uploaded_file.name.endswith(".pdf"):
@@ -132,10 +131,17 @@ INSTRUCTIONS:
                 )
                 
                 response_text = response.text
-                match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response_text)
-                json_str = match.group(1) if match else response_text
                 
-                quiz_json = json.loads(json_str)
+                # Robust JSON Extraction
+                match = re.search(r'\[\s*\{[\s\S]*\}\s*\]', response_text)
+                if match:
+                    json_str = match.group(0)
+                else:
+                    # Fallback markdown code block check
+                    match_block = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response_text)
+                    json_str = match_block.group(1) if match_block else response_text
+
+                quiz_json = json.loads(json_str.strip())
                 
                 for q in quiz_json:
                     st.session_state["asked_questions"].append(q["question"])
@@ -143,8 +149,12 @@ INSTRUCTIONS:
                 st.session_state["quiz_data"] = quiz_json
                 st.session_state["quiz_submitted"] = False
                 st.session_state["user_answers"] = {}
+                return True
             except Exception as e:
-                st.error(f"Error fetching next batch: {e}")
+                st.error(f"Error parsing quiz batch: {e}")
+                with st.expander("Debug Raw AI Response"):
+                    st.text(response_text if 'response_text' in locals() else "No response generated")
+                return False
 
     if action_choice != "Interactive Quiz & Hints":
         if st.button("Generate AI Output", type="primary", use_container_width=True):
@@ -178,8 +188,9 @@ INSTRUCTIONS:
     else:
         if "quiz_data" not in st.session_state:
             if st.button("Extract & Start Quiz from PDF", type="primary", use_container_width=True):
-                generate_quiz_batch()
-                st.rerun()
+                success = generate_quiz_batch()
+                if success:
+                    st.rerun()
         
         if "quiz_data" in st.session_state:
             quiz_data = st.session_state["quiz_data"]
@@ -235,8 +246,9 @@ INSTRUCTIONS:
                 
                 st.markdown("---")
                 if st.button("➡️ Load Next Batch of Questions", type="primary"):
-                    generate_quiz_batch()
-                    st.rerun()
+                    success = generate_quiz_batch()
+                    if success:
+                        st.rerun()
 else:
     st.markdown(
         """
