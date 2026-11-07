@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from google import genai
 from google.genai import types
+from json_repair import repair_json
 import json
 import re
 
@@ -132,18 +133,9 @@ INSTRUCTIONS:
                 
                 response_text = response.text
                 
-                # Extract JSON block
-                match = re.search(r'\[\s*\{[\s\S]*\}\s*\]', response_text)
-                if match:
-                    json_str = match.group(0)
-                else:
-                    match_block = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response_text)
-                    json_str = match_block.group(1) if match_block else response_text
-
-                # Clean up raw backslashes that break JSON escaping in equations
-                json_str = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', json_str)
-
-                quiz_json = json.loads(json_str.strip())
+                # Use json_repair to automatically fix unescaped backslashes, markdown blocks, or minor syntax issues
+                repaired_json_str = repair_json(response_text, return_objects=False)
+                quiz_json = json.loads(repaired_json_str)
                 
                 for q in quiz_json:
                     st.session_state["asked_questions"].append(q["question"])
