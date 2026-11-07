@@ -2,8 +2,6 @@ import os
 import streamlit as st
 from google import genai
 from google.genai import types
-import chess.pgn
-import io
 import json
 import re
 
@@ -51,8 +49,9 @@ with st.sidebar:
     if action_choice == "Translate Language":
         target_lang = st.selectbox("Target Language", ["Bengali (বাংলা)", "English", "Hindi (हिंदी)"])
     elif action_choice == "Interactive Quiz & Hints":
-        batch_size = st.slider("Questions per batch:", min_value=5, max_value=25, value=10, step=5)
-        st.caption("Extracts exact questions directly from your PDF/document.")
+        # Capped up to 20 as requested
+        batch_size = st.slider("Questions per batch:", min_value=5, max_value=20, value=5, step=5)
+        st.caption("Extracts exact sequential questions from your PDF.")
         
     st.markdown("---")
     st.markdown(
@@ -94,34 +93,31 @@ if uploaded_file is not None:
             st.error("Gemini API key is missing!")
             return
         
-        with st.spinner(f"Reading PDF and extracting exact questions using Gemini native vision..."):
+        with st.spinner(f"Fetching the next batch of {batch_size} questions..."):
             try:
-                excluded_list = "\n".join([f"- {q}" for q in st.session_state["asked_questions"][-50:]])
+                asked_list = st.session_state["asked_questions"]
+                excluded_text = "\n".join([f"- {q}" for q in asked_list]) if asked_list else "None yet."
                 
-                prompt = f"""You are an expert exam parser. Read the attached document carefully.
-EXTRACT the EXACT next {batch_size} consecutive questions directly from the document as they appear.
+                prompt = f"""You are an expert exam parser. Read the attached document carefully and find the NEXT set of {batch_size} consecutive questions that come AFTER the ones already asked.
 
-CRITICAL RULES:
-1. Do NOT invent new questions. Extract the real questions from the file (e.g. Physics Q1, Q2, etc.).
-2. Do NOT re-extract any of these previously extracted question titles:
-{excluded_list if excluded_list else "None yet."}
-3. Preserve the exact question text and choices (Option 1, 2, 3, 4 or A, B, C, D).
-4. For each question, solve it to determine the correct answer letter, provide a helpful hint, and write a step-by-step explanation.
+Previously asked questions that you MUST NOT repeat or include again:
+{excluded_text}
 
-Return the output STRICTLY as a valid JSON array of objects with no markdown outside:
+INSTRUCTIONS:
+1. Move forward in the document. Skip all questions listed above.
+2. Extract the exact next {batch_size} questions in sequence.
+3. For each question, solve it to determine the correct answer letter/option, provide a helpful hint, and write a step-by-step explanation.
+4. Return the output STRICTLY as a valid JSON array of objects with no markdown outside:
 [
-  {{
-    "question": "Exact question text from PDF",
+  {
+    "question": "Exact question text",
     "options": ["(1) ...", "(2) ...", "(3) ...", "(4) ..."],
-    "answer": "1",  // or "A", matching the correct option
-    "hint": "Clue to solve it",
-    "explanation": "Detailed step by step solution"
-  }}
+    "answer": "1",
+    "hint": "Clue",
+    "explanation": "Solution"
+  }
 ]"""
 
-                # Pass raw PDF bytes directly to Gemini so it reads images/scanned tables
-                mime_type = "application/pdf" if uploaded_file.name.endswith(".pdf") else "text/plain"
-                
                 if uploaded_file.name.endswith(".pdf"):
                     contents = [
                         types.Part.from_bytes(data=file_bytes, mime_type="application/pdf"),
@@ -148,7 +144,7 @@ Return the output STRICTLY as a valid JSON array of objects with no markdown out
                 st.session_state["quiz_submitted"] = False
                 st.session_state["user_answers"] = {}
             except Exception as e:
-                st.error(f"Error parsing PDF questions: {e}")
+                st.error(f"Error fetching next batch: {e}")
 
     if action_choice != "Interactive Quiz & Hints":
         if st.button("Generate AI Output", type="primary", use_container_width=True):
@@ -157,7 +153,6 @@ Return the output STRICTLY as a valid JSON array of objects with no markdown out
             else:
                 with st.spinner("Processing content..."):
                     try:
-                        mime_type = "application/pdf" if uploaded_file.name.endswith(".pdf") else "text/plain"
                         if action_choice == "Readable / Clean Version":
                             prompt = "Clean up and format the text in this file into a clean readable version."
                         elif action_choice == "Summarize & Key Insights":
