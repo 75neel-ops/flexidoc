@@ -8,7 +8,7 @@ import io
 
 # Page Configuration
 st.set_page_config(
-    page_title="FlexiDoc",
+    page_title="FlexiDoc AI - Smart Workspace",
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -30,7 +30,7 @@ if api_key:
 
 # Sidebar - Branding & Owner Info
 with st.sidebar:
-    st.title("📄 DocuVerse AI")
+    st.title("📄 FlexiDoc AI")
     st.markdown("---")
     st.markdown("### Workspace Options")
     
@@ -60,7 +60,7 @@ with st.sidebar:
     )
 
 # Main Application Header
-st.title("DocuVerse AI Workspace")
+st.title("FlexiDoc AI Workspace")
 st.markdown("Upload any file (PDF, DOCX, TXT, PGN, etc.) and let AI transform, translate, summarize, or quiz you on its contents.")
 
 # File Uploader
@@ -137,9 +137,9 @@ if uploaded_file is not None:
                     elif action_choice == "Chess PGN Breakdown":
                         prompt = f"Analyze this chess PGN or game notation. Highlight key turning points, tactical themes, mistakes, and strategic plans in plain language:\n\n{raw_text[:15000]}"
 
-                    # Call Gemini API using gemini-2.5-flash or gemini-3.5-flash-lite
+                    # Call Gemini API using gemini-3.5-flash-lite
                     response = client.models.generate_content(
-                        model='gemini-2.5-flash',
+                        model='gemini-3.5-flash-lite',
                         contents=prompt,
                     )
                     
@@ -150,7 +150,7 @@ if uploaded_file is not None:
                     st.download_button(
                         label="Download Result as Text",
                         data=response.text,
-                        file_name=f"docuverse_output_{uploaded_file.name}.txt",
+                        file_name=f"flexidoc_output_{uploaded_file.name}.txt",
                         mime="text/plain"
                     )
                     
