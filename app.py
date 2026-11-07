@@ -132,14 +132,16 @@ INSTRUCTIONS:
                 
                 response_text = response.text
                 
-                # Robust JSON Extraction
+                # Extract JSON block
                 match = re.search(r'\[\s*\{[\s\S]*\}\s*\]', response_text)
                 if match:
                     json_str = match.group(0)
                 else:
-                    # Fallback markdown code block check
                     match_block = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response_text)
                     json_str = match_block.group(1) if match_block else response_text
+
+                # Clean up raw backslashes that break JSON escaping in equations
+                json_str = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', json_str)
 
                 quiz_json = json.loads(json_str.strip())
                 
