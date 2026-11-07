@@ -5,6 +5,8 @@ import PyPDF2
 import mammoth
 import chess.pgn
 import io
+import json
+import re
 
 # Page Configuration
 st.set_page_config(
@@ -111,6 +113,8 @@ if uploaded_file is not None:
         st.info(f"**Size:** {file_size_kb:.1f} KB")
     with col3:
         if st.button("Clear File"):
+            if "quiz_data" in st.session_state:
+                del st.session_state["quiz_data"]
             st.rerun()
             
     # Extract text content
@@ -125,37 +129,116 @@ if uploaded_file is not None:
             with st.spinner("Processing content with Gemini 3.5 Flash-Lite..."):
                 try:
                     # Construct prompt based on chosen action
-                    prompt = ""
-                    if action_choice == "Readable / Clean Version":
-                        prompt = f"Clean up this text, fix typos, correct broken line breaks, and present a structured, easy-to-read version:\n\n{raw_text[:15000]}"
-                    elif action_choice == "Interactive Quiz & Hints":
-                        prompt = f"Create 3 multiple-choice questions based on this text. For each question, provide 4 options, indicate the correct answer, give a helpful hint, and explain the solution:\n\n{raw_text[:15000]}"
-                    elif action_choice == "Summarize & Key Insights":
-                        prompt = f"Provide a comprehensive executive summary, key bullet points, and main takeaways from this text:\n\n{raw_text[:15000]}"
-                    elif action_choice == "Translate Language":
-                        prompt = f"Translate the following document accurately into {target_lang}:\n\n{raw_text[:15000]}"
-                    elif action_choice == "Chess PGN Breakdown":
-                        prompt = f"Analyze this chess PGN or game notation. Highlight key turning points, tactical themes, mistakes, and strategic plans in plain language:\n\n{raw_text[:15000]}"
+                    if action_choice == "Interactive Quiz & Hints":
+                        prompt = f"""Based on the following text, generate a comprehensive set of multiple-choice questions covering all key sections. 
+Return the output STRICTLY as a valid JSON array of objects. Do not include any extra text outside the JSON block.
+Each object must have the following keys:
+- "question": string
+- "options": list of 4 strings (e.g. ["A) ...", "B) ...", "C) ...", "D) ..."])
+- "answer": string representing the correct option letter only ("A", "B", "C", or "D")
+- "hint": string providing a helpful clue without giving away the direct answer
+- "explanation": string explaining why the answer is correct
 
-                    # Call Gemini API using gemini-3.5-flash-lite
+Text to use:
+{raw_text[:20000]}"""
+                    else:
+                        if action_choice == "Readable / Clean Version":
+                            prompt = f"Clean up this text, fix typos, correct broken line breaks, and present a structured, easy-to-read version:\n\n{raw_text[:15000]}"
+                        elif action_choice == "Summarize & Key Insights":
+                            prompt = f"Provide a comprehensive executive summary, key bullet points, and main takeaways from this text:\n\n{raw_text[:15000]}"
+                        elif action_choice == "Translate Language":
+                            prompt = f"Translate the following document accurately into {target_lang}:\n\n{raw_text[:15000]}"
+                        elif action_choice == "Chess PGN Breakdown":
+                            prompt = f"Analyze this chess PGN or game notation. Highlight key turning points, tactical themes, mistakes, and strategic plans in plain language:\n\n{raw_text[:15000]}"
+
                     response = client.models.generate_content(
                         model='gemini-3.5-flash-lite',
                         contents=prompt,
                     )
                     
-                    st.markdown("### 📊 Result Workspace")
-                    st.markdown(response.text)
-                    
-                    # Download button for output
-                    st.download_button(
-                        label="Download Result as Text",
-                        data=response.text,
-                        file_name=f"flexidoc_output_{uploaded_file.name}.txt",
-                        mime="text/plain"
-                    )
+                    if action_choice == "Interactive Quiz & Hints":
+                        response_text = response.text
+                        match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response_text)
+                        if match:
+                            json_str = match.group(1)
+                        else:
+                            json_str = response_text
+                        
+                        quiz_json = json.loads(json_str)
+                        st.session_state["quiz_data"] = quiz_json
+                        st.session_state["quiz_submitted"] = False
+                    else:
+                        st.session_state.pop("quiz_data", None)
+                        st.markdown("### 📊 Result Workspace")
+                        st.markdown(response.text)
+                        
+                        st.download_button(
+                            label="Download Result as Text",
+                            data=response.text,
+                            file_name=f"flexidoc_output_{uploaded_file.name}.txt",
+                            mime="text/plain"
+                        )
                     
                 except Exception as e:
                     st.error(f"An error occurred during generation: {e}")
+
+    # Render Interactive Quiz Workspace if quiz data is loaded
+    if action_choice == "Interactive Quiz & Hints" and "quiz_data" in st.session_state:
+        st.markdown("### 🧠 Interactive Quiz Workspace")
+        st.markdown("Test your knowledge! Review the questions, use hints if needed, select your 4 choices, and submit your answers.")
+        
+        quiz_data = st.session_state["quiz_data"]
+        
+        with st.form("quiz_form"):
+            user_answers = {}
+            for idx, q in enumerate(quiz_data):
+                st.markdown(f"#### Question {idx + 1}: {q['question']}")
+                
+                # On-demand Hint Expander
+                with st.expander(f"💡 Show Hint for Question {idx + 1}"):
+                    st.write(q['hint'])
+                
+                # 4 choices via radio buttons
+                user_choice = st.radio(
+                    f"Select your answer for Q{idx + 1}:",
+                    q['options'],
+                    key=f"q_{idx}"
+                )
+                user_answers[idx] = user_choice
+                st.markdown("---")
+            
+            submitted = st.form_submit_button("Submit Answers & Check Results", type="primary")
+            
+        if submitted:
+            st.session_state["quiz_submitted"] = True
+            st.session_state["user_answers"] = user_answers
+
+        if st.session_state.get("quiz_submitted", False):
+            st.markdown("### 📋 Quiz Evaluation & Explanations")
+            score = 0
+            user_answers = st.session_state.get("user_answers", {})
+            
+            for idx, q in enumerate(quiz_data):
+                selected = user_answers.get(idx, "")
+                selected_letter = selected[0].upper() if selected else ""
+                correct_letter = q['answer'].strip().upper()
+                
+                is_correct = (selected_letter == correct_letter)
+                if is_correct:
+                    score += 1
+                
+                st.markdown(f"**Question {idx + 1}:** {q['question']}")
+                st.markdown(f"Your Answer: `{selected}`")
+                
+                if is_correct:
+                    st.success("✅ Correct!")
+                else:
+                    st.error(f"❌ Incorrect. The correct answer is **Option {correct_letter}**.")
+                
+                st.info(f"**Explanation:** {q['explanation']}")
+                st.markdown("---")
+            
+            st.metric(label="Final Score", value=f"{score} / {len(quiz_data)}")
 else:
     st.markdown(
         """
