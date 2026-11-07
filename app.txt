@@ -1,0 +1,167 @@
+import os
+import streamlit as st
+from google import genai
+import PyPDF2
+import mammoth
+import chess.pgn
+import io
+
+# Page Configuration
+st.set_page_config(
+    page_title="FlexiDoc",
+    page_icon="📄",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Initialize Gemini Client securely using Streamlit Secrets
+api_key = None
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+elif os.environ.get("GEMINI_API_KEY"):
+    api_key = os.environ.get("GEMINI_API_KEY")
+
+client = None
+if api_key:
+    try:
+        client = genai.Client(api_key=api_key)
+    except Exception as e:
+        st.error(f"Failed to initialize Gemini Client: {e}")
+
+# Sidebar - Branding & Owner Info
+with st.sidebar:
+    st.title("📄 DocuVerse AI")
+    st.markdown("---")
+    st.markdown("### Workspace Options")
+    
+    # Action Selector
+    action_choice = st.radio(
+        "Choose Transformation:",
+        [
+            "Readable / Clean Version",
+            "Interactive Quiz & Hints",
+            "Summarize & Key Insights",
+            "Translate Language",
+            "Chess PGN Breakdown"
+        ]
+    )
+    
+    target_lang = "English"
+    if action_choice == "Translate Language":
+        target_lang = st.selectbox("Target Language", ["Bengali (বাংলা)", "English", "Hindi (हिंदी)"])
+        
+    st.markdown("---")
+    # Owner Badge
+    st.markdown(
+        f"<div style='text-align: center; color: #64748b; font-size: 0.85rem; padding: 10px; background: #f1f5f9; border-radius: 8px;'>"
+        f"<b>Owner:</b> NilanjanC<br>Powered by Gemini 3.5 Flash-Lite"
+        f"</div>",
+        unsafe_allow_html=True
+    )
+
+# Main Application Header
+st.title("DocuVerse AI Workspace")
+st.markdown("Upload any file (PDF, DOCX, TXT, PGN, etc.) and let AI transform, translate, summarize, or quiz you on its contents.")
+
+# File Uploader
+uploaded_file = st.file_uploader(
+    "Drop your document or game file here",
+    type=["pdf", "docx", "txt", "pgn", "csv"]
+)
+
+# Helper function to extract text based on file type
+def extract_file_content(uploaded_file):
+    file_extension = uploaded_file.name.split(".")[-1].lower()
+    text_content = ""
+    
+    try:
+        if file_extension == "pdf":
+            reader = PyPDF2.PdfReader(uploaded_file)
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    text_content += text + "\n"
+        elif file_extension == "docx":
+            result = mammoth.extract_raw_text(uploaded_file)
+            text_content = result.value
+        elif file_extension in ["txt", "csv"]:
+            text_content = uploaded_file.getvalue().decode("utf-8")
+        elif file_extension == "pgn":
+            game = chess.pgn.read_game(io.StringIO(uploaded_file.getvalue().decode("utf-8")))
+            if game:
+                text_content = str(game)
+            else:
+                text_content = uploaded_file.getvalue().decode("utf-8")
+        else:
+            text_content = uploaded_file.getvalue().decode("utf-8", errors="ignore")
+    except Exception as e:
+        st.error(f"Error parsing file: {e}")
+        
+    return text_content
+
+if uploaded_file is not None:
+    file_bytes = uploaded_file.getvalue()
+    file_size_kb = len(file_bytes) / 1024
+    
+    # File Info Preview Box
+    col1, col2, col3 = st.columns([3, 1, 1])
+    with col1:
+        st.success(f"**File Loaded:** {uploaded_file.name}")
+    with col2:
+        st.info(f"**Size:** {file_size_kb:.1f} KB")
+    with col3:
+        if st.button("Clear File"):
+            st.rerun()
+            
+    # Extract text content
+    raw_text = extract_file_content(uploaded_file)
+    
+    if st.button("Generate AI Output", type="primary", use_container_width=True):
+        if not client:
+            st.error("Gemini API key is missing! Please configure your secrets.toml.")
+        elif not raw_text.strip():
+            st.warning("The uploaded file appears to be empty or unreadable.")
+        else:
+            with st.spinner("Processing content with Gemini 3.5 Flash-Lite..."):
+                try:
+                    # Construct prompt based on chosen action
+                    prompt = ""
+                    if action_choice == "Readable / Clean Version":
+                        prompt = f"Clean up this text, fix typos, correct broken line breaks, and present a structured, easy-to-read version:\n\n{raw_text[:15000]}"
+                    elif action_choice == "Interactive Quiz & Hints":
+                        prompt = f"Create 3 multiple-choice questions based on this text. For each question, provide 4 options, indicate the correct answer, give a helpful hint, and explain the solution:\n\n{raw_text[:15000]}"
+                    elif action_choice == "Summarize & Key Insights":
+                        prompt = f"Provide a comprehensive executive summary, key bullet points, and main takeaways from this text:\n\n{raw_text[:15000]}"
+                    elif action_choice == "Translate Language":
+                        prompt = f"Translate the following document accurately into {target_lang}:\n\n{raw_text[:15000]}"
+                    elif action_choice == "Chess PGN Breakdown":
+                        prompt = f"Analyze this chess PGN or game notation. Highlight key turning points, tactical themes, mistakes, and strategic plans in plain language:\n\n{raw_text[:15000]}"
+
+                    # Call Gemini API using gemini-2.5-flash or gemini-3.5-flash-lite
+                    response = client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=prompt,
+                    )
+                    
+                    st.markdown("### 📊 Result Workspace")
+                    st.markdown(response.text)
+                    
+                    # Download button for output
+                    st.download_button(
+                        label="Download Result as Text",
+                        data=response.text,
+                        file_name=f"docuverse_output_{uploaded_file.name}.txt",
+                        mime="text/plain"
+                    )
+                    
+                except Exception as e:
+                    st.error(f"An error occurred during generation: {e}")
+else:
+    st.markdown(
+        """
+        <div style='border: 2px dashed #cbd5e1; border-radius: 12px; padding: 40px; text-align: center; color: #64748b;'>
+            <h4>Upload a file using the sidebar or drag-and-drop above to get started.</h4>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
